@@ -42,6 +42,8 @@ bool JPrift_set(int side, int target_posi, bool reset);
 
 static
 int getRotateDirectionByMech(int recentPocket, int nowPocket, int nowDirection);
+static
+double PositionControl(double targetPocket, double nowPocket);
 
 static int win_medal_coef = 2;
 volatile uint8_t Pocket_Number;
@@ -64,11 +66,11 @@ int appTask(void){
 
 	static bool enable_flag = false;
 	static bool button_flag = true;
-	static unsigned int test_duty = 0;
-	static unsigned int rift_target = 0;
-	static unsigned int JPC_in_num = 0;
-	static bool JPC_flag = true;
-	static int test_JPC_duty = 0;
+	//static unsigned int test_duty = 0;
+	//static unsigned int rift_target = 0;
+	//static unsigned int JPC_in_num = 0;
+	//static bool JPC_flag = true;
+	//static int test_JPC_duty = 0;
 	static int button_count = 0;
 	static bool _is_manual = false;
 	static bool _launch_R_Ball = false;
@@ -89,6 +91,8 @@ int appTask(void){
 	static int rotate_direction = 1;
 	static int rotate_direction_byMech = 1;
 	static bool _Pos_control = false;
+	static double PosCtrl_target = 0.0;
+	static double PosCtrl_diff = 0.0;
 
 	if(MW_GPIORead(GPIOCID,GPIO_PIN_13) == 0 & button_flag){
 		button_flag = false;
@@ -123,6 +127,8 @@ int appTask(void){
 	}else{
 		_Pos_control = false;
 	}
+	PosCtrl_target = (double)((PC_control_rcv[2] & 0b11111000) >> 3) / 2.0;
+
 	if(((g_md_h[PIC_TYPE2].rcv_data[1] >> 3) & 0b00000001) == 1){
 		_launch_R_S1 = true;
 	}else{
@@ -175,9 +181,9 @@ int appTask(void){
 	}else{
 		_sens_pos_5 = false;
 	}
-	if(((g_md_h[PIC_TYPE2].rcv_data[1]) & 0b00000001) == 1){
+	if(((g_md_h[PIC_TYPE1].rcv_data[1] >> 2) & 0b00000001) == 1){
 		rotate_direction = 1;
-	}else if(((g_md_h[PIC_TYPE2].rcv_data[1] >> 1) & 0b00000001) == 1){
+	}else if(((g_md_h[PIC_TYPE1].rcv_data[1] >> 3) & 0b00000001) == 1){
 		rotate_direction = -1;
 	}else{
 		rotate_direction = 0;
@@ -233,7 +239,7 @@ int appTask(void){
 			}
 			if(!_ball_InStopped){
 				if(_Pos_control){
-
+					PosCtrl_diff = PositionControl(PosCtrl_target,Pocket_Number_Detailed);
 				}else{
 					g_md_h[PIC_TYPE1].snd_data[0] = PC_control_rcv[3] & 0b01001111;
 					g_md_h[PIC_TYPE1].snd_data[1] = PC_control_rcv[4];
@@ -245,12 +251,11 @@ int appTask(void){
 		}else{
 			_ball_InStopped = false;
 			if(_Pos_control){
-					
+				PosCtrl_diff = PositionControl(PosCtrl_target,Pocket_Number_Detailed);	
 			}else{
 				g_md_h[PIC_TYPE1].snd_data[0] = PC_control_rcv[3] & 0b01001111;
 				g_md_h[PIC_TYPE1].snd_data[1] = PC_control_rcv[4];
 			}
-			
 		}
 
 
@@ -292,10 +297,13 @@ int appTask(void){
 		g_md_h[PIC_TYPE2].snd_data[1] = 0b00000000;
 		_launch_R_Ball = false;
 		_launch_L_Ball = false;
+		_ball_InStop = false;
+		_ball_InStopped = false;
+		_Pos_control = false;
 	}
 
 	if( g_SY_system_counter % _MESSAGE_INTERVAL_MS < _INTERVAL_MS ){
-		//MW_printf("%d",win_medal);
+		MW_printf("[Mess] %f %f",PosCtrl_target,PosCtrl_diff);
 	}
 	return EXIT_SUCCESS;
 }
@@ -315,6 +323,39 @@ int getRotateDirectionByMech(int recentPocket, int nowPocket, int nowDirection){
 			return -1;
 		}
 	}
+}
+
+static
+double PositionControl(double targetPocket, double nowPocket){
+	double diffToTarget = targetPocket - nowPocket;
+	double diffAbs = fabs(diffToTarget);
+	double calcTarget = 0.0;
+	int16_t rotate_speed = 0;
+
+	if(diffAbs > 6.0){
+		if(diffToTarget > 0.0){
+			calcTarget = diffToTarget - 12.0;
+		}else if(diffToTarget < 0.0){
+			calcTarget = diffToTarget + 12.0;
+		}
+	}
+
+	if(fabs(calcTarget) <= ROTATE_STOP_RANGE){
+		g_md_h[PIC_TYPE1].snd_data[0] &= 0b11110000;
+		g_md_h[PIC_TYPE1].snd_data[1] = 0b00000000;
+	}else{
+		if(calcTarget > 0.0){
+			g_md_h[PIC_TYPE1].snd_data[0] &= 0b11110111;
+			g_md_h[PIC_TYPE1].snd_data[0] |= 0b00000100;
+		}else if(calcTarget < 0.0){
+			g_md_h[PIC_TYPE1].snd_data[0] &= 0b11111011;
+			g_md_h[PIC_TYPE1].snd_data[0] |= 0b00001000;
+		}
+		rotate_speed = ROTATE_MIN_SPEED + (int)(fabs(calcTarget)*ROTATE_SPEED_COEFF);
+		g_md_h[PIC_TYPE1].snd_data[0] = (g_md_h[PIC_TYPE1].snd_data[0] & 0b11111100) + ((rotate_speed >> 8) & 0b00000011);
+		g_md_h[PIC_TYPE1].snd_data[1] = rotate_speed & 0b0000000011111111;
+	}
+	return calcTarget;
 }
 
 static

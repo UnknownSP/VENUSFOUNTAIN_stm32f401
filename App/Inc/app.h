@@ -35,6 +35,10 @@ extern volatile uint8_t Pocket_In_Number;
 #define PIC_TYPE6 4
 #define PIC_TYPE8 5
 
+#define ROTATE_STOP_RANGE 0.5
+#define ROTATE_MIN_SPEED 10
+#define ROTATE_SPEED_COEFF 10.0
+
 #define RIFT_IN 0
 #define RIFT_LOWER 1
 #define RIFT_UPPER 2
